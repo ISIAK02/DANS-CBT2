@@ -1,0 +1,17 @@
+{
+  "name": "DANS CBT",
+  "short_name": "DANS CBT",
+  "description": "Turn your course PDFs into focused practice exams.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f1e8",
+  "theme_color": "#f5f1e8",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

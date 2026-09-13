@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function self(uid) { return signedIn() && request.auth.uid == uid; }
+    function admin() {
+      return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    match /users/{uid} {
+      allow create: if self(uid) && request.resource.data.role == 'user';
+      allow read: if self(uid) || admin();
+      allow update: if self(uid)
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'profilePicture', 'profilePictureChangedAt', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    match /paymentRequests/{requestId} {
+      allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin());
+      allow create, update, delete: if false;
+    }
+
+    match /subscriptions/{subscriptionId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /documents/{documentId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /questionBanks/{bankId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /examAttempts/{attemptId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+  }
+}

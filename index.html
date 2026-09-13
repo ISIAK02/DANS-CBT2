@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="DANS CBT turns your course PDFs into focused practice exams.">
+  <title>DANS CBT</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="apple-touch-icon" href="/favicon.png">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#f5f1e8">
+  <style>
+    .result-stats { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; margin:24px 0; }
+    .result-stats div { padding:14px; background:var(--paper); border:1px solid var(--line); border-radius:7px; }
+    .result-stats span, .result-stats strong { display:block; }
+    .result-stats span { color:var(--muted); font-size:.85rem; }
+    .result-stats strong { margin-top:4px; font-size:1.5rem; }
+    .review-list { display:grid; gap:16px; }
+    .review-card { padding:22px; background:var(--white); border:1px solid var(--line); border-left:4px solid var(--muted); border-radius:7px; }
+    .review-card.is-correct { border-left-color:var(--teal); }
+    .review-card.is-incorrect { border-left-color:var(--coral); }
+    .review-card .question-meta { display:flex; justify-content:space-between; gap:16px; color:var(--muted); font-size:.85rem; }
+    .review-card .question-meta strong { color:var(--ink); }
+    .review-card p { margin-bottom:10px; }
+    .review-label { display:block; color:var(--muted); font-size:.8rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+    @media (max-width:520px) { .result-stats { grid-template-columns:1fr; } }
+  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="#dashboard"><span class="brand-mark">D</span><span>DANS CBT<span class="brand-dot">.</span></span></a><div class="topbar-actions"><div id="notification-bar" class="notification-bar"></div><button class="menu-toggle" id="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false"><span></span><span></span><span></span></button></div><nav id="nav"></nav></header>
+  <main id="app"><section class="loading-screen"><div class="loader"></div><p>Preparing DANS CBT...</p></section></main>
+  <div id="toast" class="toast" role="status"></div>
+  <a class="whatsapp-button" href="https://wa.me/2349046148857?text=Hi%2C%20I%20would%20love%20to%20know%20more%20about%20Dan%27s%20CBT%E2%98%BA%EF%B8%8F." target="_blank" rel="noreferrer" aria-label="Chat with customer support on WhatsApp" title="Chat with customer support on WhatsApp"><svg aria-hidden="true" viewBox="0 0 24 24" role="img"><path d="M12.04 2a9.91 9.91 0 0 0-8.58 14.87L2 22l5.28-1.39A9.91 9.91 0 1 0 12.04 2Zm0 18.15a8.22 8.22 0 0 1-4.19-1.15l-.3-.18-3.14.83.84-3.06-.2-.31a8.23 8.23 0 1 1 6.99 3.87Zm4.52-6.17c-.25-.13-1.47-.73-1.7-.81-.23-.08-.39-.13-.56.13-.16.25-.64.81-.78.97-.14.17-.29.19-.54.06-.25-.13-1.05-.39-2-1.24-.74-.66-1.24-1.47-1.39-1.72-.14-.25-.02-.39.11-.52.12-.12.25-.29.37-.43.12-.15.16-.25.25-.42.08-.17.04-.31-.02-.44-.06-.13-.56-1.35-.77-1.85-.2-.49-.41-.42-.56-.43h-.48c-.17 0-.44.06-.67.31-.23.25-.88.86-.88 2.1s.9 2.44 1.03 2.61c.13.17 1.77 2.7 4.29 3.79.6.26 1.07.41 1.43.53.6.19 1.15.16 1.58.1.48-.07 1.47-.6 1.68-1.18.21-.58.21-1.08.15-1.18-.06-.1-.23-.16-.48-.29Z" /></svg></a>
+  <script type="module" src="/app.js"></script>
+  <script>
+    document.addEventListener("click", event => {
+      const button = event.target.closest?.("[data-plan]");
+      if (button) location.hash = `pay/${button.dataset.plan}`;
+    });
+
+    const appFetch = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input.url;
+      if (url.includes("/api/exams") && init?.body) {
+        try {
+          const payload = JSON.parse(init.body);
+          if (payload.action === "submit") window.__examAnsweredCount = Object.keys(payload.answers || {}).length;
+        } catch (_) { }
+      }
+      return appFetch(input, init);
+    };
+
+    new MutationObserver(() => {
+      const status = document.querySelector("#pdf-form p");
+      const result = document.querySelector(".result");
+      if (!result || result.dataset.statsAdded) return;
+      const match = result.textContent.match(/You answered (\d+) of (\d+) questions correctly/);
+      const heading = result.querySelector("h1");
+      if (!match || !heading) return;
+      const total = Number(match[2]);
+      const correct = Number(match[1]);
+      const submitted = Math.min(Number(window.__examAnsweredCount || 0), total);
+      result.dataset.statsAdded = "true";
+      heading.insertAdjacentHTML("beforebegin", `<div class="result-stats"><div><span>Answered</span><strong>${submitted}</strong></div><div><span>Failed</span><strong>${submitted - correct}</strong></div><div><span>Unanswered</span><strong>${total - submitted}</strong></div></div>`);
+    }).observe(document.querySelector("#app"), { childList: true, subtree: true });
+
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js"));
+    }
+  </script>
+</body>
+</html>
