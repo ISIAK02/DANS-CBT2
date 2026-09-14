@@ -6,6 +6,7 @@ document.addEventListener("submit", async event => {
 	if (event.target.id !== "auth-form" || !event.target.elements.name || event.target.dataset.registrationHandled) return;
 	event.preventDefault();
 	event.stopImmediatePropagation();
+	event.target.dataset.registrationDispatchHandled = "true";
 	event.target.dataset.registrationHandled = "true";
 	const data = Object.fromEntries(new FormData(event.target));
 	const button = event.target.querySelector("button");
@@ -13,17 +14,14 @@ document.addEventListener("submit", async event => {
 	button.textContent = "Working...";
 	try {
 		const result = await createUserWithEmailAndPassword(auth, data.email, data.password);
-		await setDoc(doc(db, "users", result.user.uid), { uid: result.user.uid, name: data.name, email: data.email, role: "user", createdAt: serverTimestamp() });
-		const picture = event.target.elements.profilePictureFile.files[0];
-		if (picture) {
-			const pictureUrl = await uploadProfilePicture(picture);
-			await api("profile", { action: "update", name: data.name, profilePicture: pictureUrl });
-		}
+		pendingSignupPicture = event.target.elements.profilePictureFile.files[0] || null;
+		pendingSignupProfile = { name: data.name, email: data.email };
 		await sendEmailVerification(result.user);
 		pendingVerificationEmail = result.user.email;
 		notify("Verification email sent. Check your Gmail inbox.");
 		verificationView();
 	} catch (error) {
+		delete event.target.dataset.registrationHandled;
 		notify(authErrorMessage(error), true);
 		button.disabled = false;
 		button.textContent = "Create account";
@@ -34,6 +32,7 @@ let auth;
 let db;
 let currentUser;
 let userProfile = null;
+let pendingSignupProfile = null;
 let pendingSignupPicture = null;
 let isAdmin = false;
 let firebaseReady = false;
@@ -50,6 +49,31 @@ const money = value => `₦${Number(value).toLocaleString("en-NG")}`;
 const escape = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
 function notify(message, error = false) { toast.textContent = message; toast.className = `toast show ${error ? "error" : ""}`; setTimeout(() => toast.className = "toast", 4500); }
 function authErrorMessage(error) { if (["auth/email-already-in-use", "auth/account-exists-with-different-credential"].includes(error?.code)) return "Email is already registered."; if (["auth/invalid-credential", "auth/invalid-login-credentials", "auth/wrong-password", "auth/user-not-found"].includes(error?.code)) return "Wrong email or password."; return error?.message || "Authentication failed. Please try again."; }
+async function copyTextForSafari(value) {
+	if (navigator.clipboard?.writeText) {
+		try {
+			await navigator.clipboard.writeText(value);
+			return;
+		} catch {}
+	}
+	const input = document.createElement("textarea");
+	input.value = value;
+	input.setAttribute("readonly", "");
+	input.style.position = "fixed";
+	input.style.opacity = "0";
+	document.body.append(input);
+	input.select();
+	const copied = document.execCommand("copy");
+	input.remove();
+	if (!copied) throw new Error("Copy is unavailable. Please copy the number manually.");
+}
+document.addEventListener("click", event => {
+	const button = event.target.closest?.("[data-copy]");
+	if (!button) return;
+	event.preventDefault();
+	event.stopImmediatePropagation();
+	copyTextForSafari(button.dataset.copy).then(() => notify("Copied to clipboard.")).catch(error => notify(error.message, true));
+}, true);
 async function api(path, payload, method = "POST") {
 	const request = async forceRefresh => {
 		const user = auth?.currentUser || currentUser;
@@ -69,6 +93,39 @@ function closeNavigation() { nav.classList.remove("open"); nav.dataset.open = "f
 document.querySelector("#menu-toggle")?.addEventListener("click", event => { event.preventDefault(); const open = nav.dataset.open !== "true"; nav.dataset.open = String(open); nav.classList.toggle("open", open); const menu = document.querySelector("#menu-toggle"); menu?.setAttribute("aria-expanded", String(open)); menu?.setAttribute("aria-label", open ? "Close navigation" : "Open navigation"); });
 function authView(mode = "login") { const register = mode === "register"; app.innerHTML = `<section class="auth-layout"><div class="auth-copy"><p class="eyebrow">A calmer way to prepare</p><h1>Turn your notes into your next best score.</h1><p>Upload your educational PDFs, build a reliable question bank, and practice with a focused CBT simulator.</p><div class="stat-row"><strong>50</strong><span>randomized questions per exam</span></div></div><form class="panel auth-form" id="auth-form"><div><p class="eyebrow">DANS CBT account</p><h2>${register ? "Create your account" : "Welcome back"}</h2></div>${register ? '<label>Full name or nickname<input name="name" required autocomplete="name"></label><label>Profile picture <span class="muted">optional</span><input name="profilePictureFile" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"></label>' : ""}<label>Email<input name="email" type="email" required autocomplete="email"></label><label>Password<input name="password" type="password" minlength="6" required autocomplete="current-password"></label><button class="button" type="submit">${register ? "Create account" : "Log in"}</button>${register ? '<button class="verify-guide-button" id="verify-email-guide" type="button">Having troubles verifying your account? Click here to watch an instruction guide on how to verify your email.</button>' : ""}<p class="form-switch">${register ? "Already have an account?" : "New to DANS CBT?"} <a href="#${register ? "login" : "register"}">${register ? "Log in" : "Create an account"}</a></p></form></section>`; document.querySelector("#auth-form").addEventListener("submit", async event => { event.preventDefault(); const data = Object.fromEntries(new FormData(event.currentTarget)); const button = event.currentTarget.querySelector("button[type=submit]"); button.disabled = true; button.textContent = "Working..."; try { if (register) { const result = await createUserWithEmailAndPassword(auth, data.email, data.password); await setDoc(doc(db, "users", result.user.uid), { uid: result.user.uid, name: data.name, email: data.email, role: "user", createdAt: serverTimestamp() }); } else await signInWithEmailAndPassword(auth, data.email, data.password); location.hash = "dashboard"; } catch (error) { notify(error.message, true); button.disabled = false; button.textContent = register ? "Create account" : "Log in"; } }); }
 async function uploadProfilePicture(file) { if (!file) return ""; if (!/^image\/(jpeg|png|webp)$/.test(file.type)) throw new Error("Profile pictures must be JPG, PNG, or WebP images."); if (file.size > 3 * 1024 * 1024) throw new Error("Profile pictures must be smaller than 3 MB."); const signature = await api("profile", { action: "upload-signature" }); const upload = new FormData(); upload.append("file", file); upload.append("api_key", signature.apiKey); upload.append("timestamp", signature.timestamp); upload.append("signature", signature.signature); upload.append("folder", signature.folder); upload.append("public_id", signature.publicId); const result = await fetch(signature.uploadUrl, { method: "POST", body: upload }); const data = await result.json(); if (!result.ok || !data.secure_url) throw new Error(data.error?.message || "Profile picture upload failed."); return data.secure_url; }
+async function ensureVerifiedUserProfile(user) {
+	if (!user?.emailVerified) return;
+	const profileRef = doc(db, "users", user.uid);
+	if ((await getDoc(profileRef)).exists()) return;
+	const pending = pendingSignupProfile;
+	await setDoc(profileRef, { uid: user.uid, name: pending?.name || user.displayName || user.email?.split("@")[0] || "Student", email: user.email || pending?.email || "", role: "user", createdAt: serverTimestamp() });
+	if (pendingSignupPicture) {
+		const pictureUrl = await uploadProfilePicture(pendingSignupPicture);
+		await api("profile", { action: "update", name: pending?.name || user.displayName || "Student", profilePicture: pictureUrl });
+	}
+	pendingSignupProfile = null;
+	pendingSignupPicture = null;
+}
+document.addEventListener("click", async event => {
+	const button = event.target.closest?.("#check-verification");
+	if (!button) return;
+	event.preventDefault();
+	event.stopImmediatePropagation();
+	button.disabled = true;
+	try {
+		await reload(auth.currentUser);
+		currentUser = auth.currentUser;
+		if (!currentUser.emailVerified) throw new Error("Your email is not verified yet. Open the link in your email, then try again.");
+		await currentUser.getIdToken(true);
+		await ensureVerifiedUserProfile(currentUser);
+		pendingVerificationEmail = "";
+		notify("Your account has been verified.");
+		location.hash = "dashboard";
+	} catch (error) {
+		notify(error.message, true);
+		button.disabled = false;
+	}
+}, true);
 async function profileView() { app.innerHTML = `<section class="narrow"><div class="page-heading"><div><p class="eyebrow">Your account</p><h1>Profile.</h1><p class="muted">Change your display name and keep your leaderboard identity up to date.</p></div></div><form class="panel profile-form" id="profile-form"><div id="profile-preview" class="profile-preview"></div><label>Name or nickname<input name="name" maxlength="80" required></label><label>Profile picture <span class="muted">JPG, PNG, or WebP · max 3 MB</span><input name="picture" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"></label><p id="profile-picture-note" class="muted"></p><button class="button" type="submit">Save profile</button></form></section>`; try { const result = await api("profile", { action: "get" }); const profile = result.profile; userProfile = profile; const form = document.querySelector("#profile-form"); form.name.value = profile.name || ""; const preview = document.querySelector("#profile-preview"); preview.innerHTML = profile.profilePicture ? `<img src="${escape(profile.profilePicture)}" alt="Current profile picture">` : `<span>${escape((profile.name || "S").slice(0, 1).toUpperCase())}</span>`; if (profile.profilePictureChangedAt) document.querySelector("#profile-picture-note").textContent = "Profile pictures can be changed once every 30 days."; form.onsubmit = async event => { event.preventDefault(); const button = form.querySelector("button"); button.disabled = true; button.textContent = "Saving..."; try { const file = form.picture.files[0]; const picture = file ? await uploadProfilePicture(file) : profile.profilePicture; const saved = await api("profile", { action: "update", name: form.name.value, profilePicture: picture }); userProfile = saved.profile; notify("Profile updated."); await profileView(); } catch (error) { notify(error.message, true); button.disabled = false; button.textContent = "Save profile"; } }; } catch (error) { notify(error.message, true); } }
 async function bookmarksView() { app.innerHTML = `<section class="narrow"><div class="page-heading"><div><p class="eyebrow">Your revision shelf</p><h1>Bookmarked questions.</h1><p class="muted">Keep the questions you want to revisit close at hand.</p></div></div><div id="bookmarks-list" class="review-list"><p class="empty">Loading bookmarks...</p></div></section>`; try { const result = await api("exams", { action: "bookmarks" }); const list = document.querySelector("#bookmarks-list"); list.innerHTML = result.bookmarks.length ? result.bookmarks.map(item => `<article class="review-card"><div class="question-meta"><span>Saved question</span><strong>Revision</strong></div><h2>${escape(item.prompt)}</h2><p><span class="review-label">Correct answer</span>${escape(item.choices?.[item.answer] || "")}</p>${item.explanation ? `<p class="muted"><span class="review-label">Source explanation</span>${escape(item.explanation)}</p>` : ""}</article>`).join("") : '<p class="empty">No bookmarked questions yet. Save one from an exam review.</p>'; } catch (error) { notify(error.message, true); } }
 function resetPasswordView() { app.innerHTML = `<section class="narrow"><div class="page-heading"><div><p class="eyebrow">Account access</p><h1>Reset your password.</h1><p class="muted">Enter your email and we will send you a secure Firebase password-reset link.</p></div></div><form class="panel auth-form" id="reset-password-form"><label>Email<input name="email" type="email" required autocomplete="email"></label><button class="button" type="submit">Send reset email</button><p class="form-switch"><a href="#login">Back to log in</a></p></form></section>`; document.querySelector("#reset-password-form").addEventListener("submit", async event => { event.preventDefault(); const form = event.currentTarget; const button = form.querySelector("button"); button.disabled = true; button.textContent = "Sending..."; try { await sendPasswordResetEmail(auth, new FormData(form).get("email")); notify("Password reset email sent. Check your inbox and Spam folder."); form.reset(); } catch (error) { notify(error.message, true); } finally { button.disabled = false; button.textContent = "Send reset email"; } }); }
