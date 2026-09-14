@@ -2,22 +2,18 @@ from datetime import timedelta
 
 from firebase_admin import firestore
 
-from _common import PLANS, active_subscription, body, db, json_error, now, require_user, response
+from _common import PLANS, active_subscription, body, db, expire_subscriptions, json_error, now, require_user, response
 
 
 def handler(event):
     try:
         user = require_user(event)
         if event.get("httpMethod", "GET") == "GET":
+            expire_subscriptions(user["uid"])
             records = db().collection("subscriptions").where("userId", "==", user["uid"]).stream()
             subscriptions = []
-            current = now()
             for item in records:
                 data = item.to_dict()
-                end = data.get("subscriptionEnd")
-                if data.get("status") == "active" and not data.get("permanent") and end and end.timestamp() <= current.timestamp():
-                    db().collection("subscriptions").document(item.id).update({"status": "expired"})
-                    data["status"] = "expired"
                 subscriptions.append({"id": item.id, **data})
             subscriptions.sort(key=lambda item: str(item.get("createdAt", "")), reverse=True)
             return response({"subscriptions": subscriptions[:10]})

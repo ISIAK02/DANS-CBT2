@@ -78,17 +78,37 @@ def now():
 
 
 def active_subscription(uid):
+    expire_subscriptions(uid)
     records = db().collection("subscriptions").where("userId", "==", uid).where("status", "==", "active").limit(10).stream()
-    current = now()
     for record in records:
         data = record.to_dict()
-        end = data.get("subscriptionEnd")
         if data.get("permanent"):
             return record
-        if end and end.timestamp() > current.timestamp():
-            return record
-        db().collection("subscriptions").document(record.id).update({"status": "expired"})
     return None
+
+
+def expire_subscriptions(uid=None):
+    query = db().collection("subscriptions").where("status", "==", "active")
+    if uid:
+        query = query.where("userId", "==", uid)
+    current = now()
+    expired = []
+    for record in query.stream():
+        data = record.to_dict()
+        end = data.get("subscriptionEnd")
+        if data.get("permanent") or not end:
+            if not data.get("permanent") and not end:
+                expired.append(record.reference)
+            continue
+        if end.timestamp() <= current.timestamp():
+            expired.append(record.reference)
+    if expired:
+        for offset in range(0, len(expired), 400):
+            batch = db().batch()
+            for reference in expired[offset:offset + 400]:
+                batch.update(reference, {"status": "expired", "expiredAt": current})
+            batch.commit()
+    return len(expired)
 
 
 def json_error(exc):
