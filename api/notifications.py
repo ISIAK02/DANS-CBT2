@@ -13,6 +13,13 @@ def handler(event):
             items.sort(key=lambda item: str(item.get("createdAt", "")), reverse=True)
             return response({"notifications": items})
         payload = body(event)
+        if payload.get("action") == "delete-all":
+            records = collection.where("recipientId", "==", user["uid"]).stream()
+            batch = db().batch()
+            for notification in records:
+                batch.delete(collection.document(notification.id))
+            batch.commit()
+            return response({"ok": True})
         if payload.get("action") == "mark-read":
             notification_id = str(payload.get("notificationId", ""))
             if not notification_id:
